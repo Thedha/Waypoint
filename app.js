@@ -95,6 +95,7 @@ const state = {
   selectedGoalId: null,
   modal: null,           // null | 'addGoal' | 'addCheckpoint' | 'confirmDeleteGoal'
   agendaRange: 'today',  // 'today' | 'week' | 'month'
+  selectedDate: null,    // dateKey string, used by the month calendar view
 };
 const today = startOfDay(new Date());
 
@@ -137,22 +138,29 @@ function renderBottomNav(){
 
 /* ===================== rendering: goals list ===================== */
 function renderGoalsList(){
-  const goals = state.goals;
+  // stable sort: completed goals sink to the bottom, order within each group preserved
+  const goals = [...state.goals].sort((a,b)=> (a.completed?1:0) - (b.completed?1:0));
   const empty = goals.length===0 ? `
     <div class="empty-state">Nothing here yet. Add a goal, decide how you'll get there, and how you'll know you've made it.</div>
   ` : '';
 
   const cards = goals.map(goal=>{
+    const completed = !!goal.completed;
     const totalCp = goal.checkpoints.length;
     const dueToday = goal.checkpoints.filter(cp=>isScheduledOn(cp, today)).length;
     const doneToday = goal.checkpoints.filter(cp=>isScheduledOn(cp, today) && cp.completions[dateKey(today)]).length;
     const sub = totalCp===0 ? 'No checkpoints yet' : dueToday>0 ? `${doneToday}/${dueToday} due today` : `${totalCp} checkpoint${totalCp>1?'s':''}`;
     return `
-    <button class="goal-card" data-action="open-goal" data-id="${goal.id}">
-      <div class="goal-card-title">${escapeHtml(goal.title)}</div>
-      <div class="goal-card-sub">${sub}</div>
-      <div class="goal-card-graph">${renderGraph(goal, 10)}</div>
-    </button>`;
+    <div class="goal-card ${completed?'completed':''}">
+      <button class="goal-check ${completed?'done':''}" data-action="toggle-goal-complete" data-id="${goal.id}" aria-label="Mark goal complete">
+        ${ICONS.check}
+      </button>
+      <button class="goal-card-body" data-action="open-goal" data-id="${goal.id}">
+        <div class="goal-card-title">${escapeHtml(goal.title)}</div>
+        <div class="goal-card-sub">${sub}</div>
+        <div class="goal-card-graph">${renderGraph(goal, 10)}</div>
+      </button>
+    </div>`;
   }).join('');
 
   return `
@@ -172,12 +180,8 @@ function buildDayGroups(){
   else if (state.agendaRange==='week'){
     const start = startOfWeek(today);
     dates = Array.from({length:7}, (_,i)=>addDays(start,i));
-  } else {
-    const start = startOfMonth(today);
-    const days = endOfMonth(today).getDate();
-    dates = Array.from({length:days}, (_,i)=>addDays(start,i));
   }
-  let groups = dates.map(date=>{
+  return dates.map(date=>{
     const items = [];
     for (const goal of state.goals){
       for (const cp of goal.checkpoints){
@@ -186,53 +190,132 @@ function buildDayGroups(){
     }
     return { date, items };
   });
-  if (state.agendaRange==='month') groups = groups.filter(g=>g.items.length>0);
-  return groups;
+}
+
+function itemsForDate(date){
+  const items = [];
+  for (const goal of state.goals){
+    for (const cp of goal.checkpoints){
+      if (isScheduledOn(cp, date)) items.push({ goal, cp });
+    }
+  }
+  return items;
+}
+
+function renderAgendaRows(date, items){
+  const isFuture = date > today;
+  const isPast = date < today && !isSameDay(date, today);
+  return items.length===0 ? `<div class="agenda-empty-row">Nothing scheduled</div>` : items.map(({goal, cp})=>{
+    const done = !!cp.completions[dateKey(date)];
+    const stateCls = isFuture ? 'disabled' : done ? 'done' : isPast ? 'missed' : '';
+    return `
+    <div class="agenda-row">
+      <button class="circle ${stateCls}" ${isFuture?'disabled':''} data-action="toggle" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${dateKey(date)}">
+        ${ICONS.check}
+      </button>
+      <div class="agenda-row-text">
+        <div class="agenda-row-title ${done?'done':''}">${escapeHtml(cp.title)}</div>
+        <div class="agenda-row-goal">${escapeHtml(goal.title)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ===================== rendering: month calendar ===================== */
+function buildMonthMatrix(anchor){
+  const start = startOfMonth(anchor);
+  const daysInMonth = endOfMonth(anchor).getDate();
+  const matrix = [];
+  let week = new Array(start.getDay()).fill(null);
+  for (let day=1; day<=daysInMonth; day++){
+    week.push(new Date(anchor.getFullYear(), anchor.getMonth(), day));
+    if (week.length===7){ matrix.push(week); week = []; }
+  }
+  if (week.length){
+    while (week.length<7) week.push(null);
+    matrix.push(week);
+  }
+  return matrix;
+}
+
+function renderMonthCalendar(){
+  const matrix = buildMonthMatrix(today);
+  const monthLabel = today.toLocaleDateString(undefined, { month:'long', year:'numeric' });
+  const selected = state.selectedDate || dateKey(today);
+  const weekdayRow = WEEKDAY_MIN.map(l=>`<div class="cal-weekday">${l}</div>`).join('');
+
+  const rows = matrix.map(week=>{
+    const cells = week.map(d=>{
+      if (!d) return `<div class="cal-cell empty"></div>`;
+      const key = dateKey(d);
+      const items = itemsForDate(d);
+      const isFuture = d > today;
+      const isToday = isSameDay(d, today);
+      const isSelected = key===selected;
+      let dot = '';
+      if (items.length>0){
+        let dotCls = 'future';
+        if (!isFuture){
+          const done = items.filter(({goal,cp})=>cp.completions[key]).length;
+          const ratio = done/items.length;
+          dotCls = ratio>=1 ? 'full' : ratio>0 ? 'partial' : 'none';
+        }
+        dot = `<span class="cal-dot ${dotCls}"></span>`;
+      }
+      return `
+      <button class="cal-cell ${isToday?'today':''} ${isSelected?'selected':''}" data-action="select-date" data-date="${key}">
+        <span class="cal-daynum">${d.getDate()}</span>${dot}
+      </button>`;
+    }).join('');
+    return `<div class="cal-row">${cells}</div>`;
+  }).join('');
+
+  return `
+  <div class="calendar">
+    <div class="cal-month-label">${monthLabel}</div>
+    <div class="cal-weekdays">${weekdayRow}</div>
+    <div class="cal-grid">${rows}</div>
+  </div>`;
+}
+
+function renderSelectedDayAgenda(){
+  const key = state.selectedDate || dateKey(today);
+  const date = new Date(key + 'T00:00:00');
+  const items = itemsForDate(date);
+  const dayLabel = fmtDay(date, today);
+  return `
+  <div class="agenda-day">
+    <div class="agenda-day-label ${isSameDay(date,today)?'today':''}">${dayLabel}</div>
+    ${renderAgendaRows(date, items)}
+  </div>`;
 }
 
 function renderAgenda(){
-  const groups = buildDayGroups();
-  const allEmpty = groups.every(g=>g.items.length===0);
-
   const tabs = ['today','week','month'].map(key=>{
     const label = key==='today'?'Day':key==='week'?'Week':'Month';
     return `<button class="seg-btn ${state.agendaRange===key?'active':''}" data-action="set-range" data-range="${key}">${label}</button>`;
   }).join('');
 
-  const empty = allEmpty ? `<div class="empty-state">Nothing scheduled for this ${state.agendaRange==='today'?'day':state.agendaRange}.</div>` : '';
-
-  const days = groups.map(({date, items})=>{
-    if (state.agendaRange==='month' && items.length===0) return '';
-    const isFuture = date > today;
-    const isPast = date < today && !isSameDay(date, today);
-    const dayLabel = fmtDay(date, today);
-    const rows = items.length===0 ? `<div class="agenda-empty-row">Nothing scheduled</div>` : items.map(({goal, cp})=>{
-      const done = !!cp.completions[dateKey(date)];
-      let stateCls = isFuture ? 'disabled' : done ? 'done' : isPast ? 'missed' : '';
-      return `
-      <div class="agenda-row">
-        <button class="circle ${stateCls}" ${isFuture?'disabled':''} data-action="toggle" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${dateKey(date)}">
-          ${ICONS.check}
-        </button>
-        <div class="agenda-row-text">
-          <div class="agenda-row-title ${done?'done':''}">${escapeHtml(cp.title)}</div>
-          <div class="agenda-row-goal">${escapeHtml(goal.title)}</div>
-        </div>
-      </div>`;
-    }).join('');
-    return `
+  let body;
+  if (state.agendaRange==='month'){
+    body = renderMonthCalendar() + renderSelectedDayAgenda();
+  } else {
+    const groups = buildDayGroups();
+    const allEmpty = groups.every(g=>g.items.length===0);
+    const empty = allEmpty ? `<div class="empty-state">Nothing scheduled for this ${state.agendaRange==='today'?'day':state.agendaRange}.</div>` : '';
+    const days = groups.map(({date, items})=>`
     <div class="agenda-day">
-      <div class="agenda-day-label ${isSameDay(date,today)?'today':''}">${dayLabel}</div>
-      ${rows}
-    </div>`;
-  }).join('');
+      <div class="agenda-day-label ${isSameDay(date,today)?'today':''}">${fmtDay(date, today)}</div>
+      ${renderAgendaRows(date, items)}
+    </div>`).join('');
+    body = `${empty}<div class="agenda-list">${days}</div>`;
+  }
 
   return `
   <div class="page">
     <div class="page-header"><h1>Checkpoints</h1></div>
     <div class="segmented">${tabs}</div>
-    ${empty}
-    <div class="agenda-list">${days}</div>
+    ${body}
   </div>`;
 }
 
@@ -434,7 +517,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
         state.tab = el.dataset.tab; render(); break;
 
       case 'set-range':
-        state.agendaRange = el.dataset.range; render(); break;
+        state.agendaRange = el.dataset.range;
+        if (state.agendaRange==='month' && !state.selectedDate) state.selectedDate = dateKey(today);
+        render(); break;
+
+      case 'select-date':
+        state.selectedDate = el.dataset.date; render(); break;
 
       case 'open-goal':
         state.selectedGoalId = el.dataset.id; render(); break;
@@ -459,9 +547,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
         if (!title) return;
         const strategy = document.getElementById('f-strategy').value.trim();
         const metric = document.getElementById('f-metric').value.trim();
-        const newGoal = { id: uid(), title, strategy, metric, checkpoints: [] };
+        const newGoal = { id: uid(), title, strategy, metric, checkpoints: [], completed: false };
         state.modal = null;
         persistGoals([newGoal, ...state.goals]);
+        break;
+      }
+
+      case 'toggle-goal-complete': {
+        const id = el.dataset.id;
+        persistGoals(state.goals.map(g=> g.id===id ? { ...g, completed: !g.completed } : g));
         break;
       }
 
