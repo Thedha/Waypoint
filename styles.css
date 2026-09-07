@@ -178,6 +178,8 @@ h1, h2 { margin: 0; }
 .agenda-row-title.done{ color: var(--faint); text-decoration: line-through; }
 .agenda-row-goal{ font-size: 12px; color: var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+.row-actions{ display:flex; gap:6px; flex-shrink:0; }
+
 /* circle checkbox */
 .circle{
   flex-shrink:0; width:30px; height:30px; border-radius:50%;
@@ -188,6 +190,17 @@ h1, h2 { margin: 0; }
 .circle.done{ background: var(--accent); border-color: var(--accent); color: white; }
 .circle.missed{ border-color: var(--red); }
 .circle.disabled{ border-color: var(--border); }
+
+.circle-miss{
+  flex-shrink:0; width:30px; height:30px; border-radius:50%;
+  border: 2px solid var(--stone-300); background: none;
+  display:flex; align-items:center; justify-content:center; color: transparent;
+}
+.circle-miss svg{ width:13px; height:13px; }
+.circle-miss.active{ background: var(--red); border-color: var(--red); color: #2a0e0e; }
+.circle-miss.disabled{ border-color: var(--border); }
+
+.agenda-row-title.missed-text{ color: var(--red); }
 
 /* goal detail */
 .detail-topbar{

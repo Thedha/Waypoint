@@ -46,7 +46,7 @@ function dayStats(goal, date){
   for (const cp of goal.checkpoints){
     if (isScheduledOn(cp, date)){
       scheduled++;
-      if (cp.completions[dateKey(date)]) completed++;
+      if (cp.completions[dateKey(date)]===true) completed++;
     }
   }
   return { scheduled, completed };
@@ -149,7 +149,7 @@ function renderGoalsList(){
     const completed = !!goal.completed;
     const totalCp = goal.checkpoints.length;
     const dueToday = goal.checkpoints.filter(cp=>isScheduledOn(cp, today)).length;
-    const doneToday = goal.checkpoints.filter(cp=>isScheduledOn(cp, today) && cp.completions[dateKey(today)]).length;
+    const doneToday = goal.checkpoints.filter(cp=>isScheduledOn(cp, today) && cp.completions[dateKey(today)]===true).length;
     const sub = totalCp===0 ? 'No checkpoints yet' : dueToday>0 ? `${doneToday}/${dueToday} due today` : `${totalCp} checkpoint${totalCp>1?'s':''}`;
     return `
     <div class="goal-card ${completed?'completed':''}">
@@ -207,15 +207,25 @@ function renderAgendaRows(date, items){
   const isFuture = date > today;
   const isPast = date < today && !isSameDay(date, today);
   return items.length===0 ? `<div class="agenda-empty-row">Nothing scheduled</div>` : items.map(({goal, cp})=>{
-    const done = !!cp.completions[dateKey(date)];
-    const stateCls = isFuture ? 'disabled' : done ? 'done' : isPast ? 'missed' : '';
+    const key = dateKey(date);
+    const value = cp.completions[key];
+    const done = value===true;
+    const missed = value==='missed';
+    const autoMissed = !done && !missed && isPast; // past, never marked either way
+    const doneCls = isFuture ? 'disabled' : done ? 'done' : (missed || autoMissed) ? 'missed' : '';
+    const missCls = isFuture ? 'disabled' : missed ? 'active' : '';
     return `
     <div class="agenda-row">
-      <button class="circle ${stateCls}" ${isFuture?'disabled':''} data-action="toggle" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${dateKey(date)}">
-        ${ICONS.check}
-      </button>
+      <div class="row-actions">
+        <button class="circle ${doneCls}" ${isFuture?'disabled':''} data-action="toggle" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${key}" aria-label="Mark done">
+          ${ICONS.check}
+        </button>
+        <button class="circle-miss ${missCls}" ${isFuture?'disabled':''} data-action="mark-missed" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${key}" aria-label="Mark didn't do">
+          ${ICONS.x}
+        </button>
+      </div>
       <div class="agenda-row-text">
-        <div class="agenda-row-title ${done?'done':''}">${escapeHtml(cp.title)}</div>
+        <div class="agenda-row-title ${done?'done':''} ${missed?'missed-text':''}">${escapeHtml(cp.title)}</div>
         <div class="agenda-row-goal">${escapeHtml(goal.title)}</div>
       </div>
     </div>`;
@@ -258,7 +268,7 @@ function renderMonthCalendar(){
       if (items.length>0){
         let dotCls = 'future';
         if (!isFuture){
-          const done = items.filter(({goal,cp})=>cp.completions[key]).length;
+          const done = items.filter(({goal,cp})=>cp.completions[key]===true).length;
           const ratio = done/items.length;
           dotCls = ratio>=1 ? 'full' : ratio>0 ? 'partial' : 'none';
         }
@@ -331,14 +341,22 @@ function renderGoalDetail(goal){
   const rows = goal.checkpoints.length===0 ? `
     <div class="empty-state small">No checkpoints yet. Add one to start tracking.</div>
   ` : goal.checkpoints.map(cp=>{
-    const doneToday = !!cp.completions[todayKey];
+    const value = cp.completions[todayKey];
+    const doneToday = value===true;
+    const missedToday = value==='missed';
     const scheduledToday = isScheduledOn(cp, today);
-    const cls = !scheduledToday ? 'disabled' : doneToday ? 'done' : '';
+    const doneCls = !scheduledToday ? 'disabled' : doneToday ? 'done' : missedToday ? 'missed' : '';
+    const missCls = !scheduledToday ? 'disabled' : missedToday ? 'active' : '';
     return `
     <div class="cp-row">
-      <button class="circle ${cls}" ${!scheduledToday?'disabled':''} data-action="toggle" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${todayKey}">
-        ${ICONS.check}
-      </button>
+      <div class="row-actions">
+        <button class="circle ${doneCls}" ${!scheduledToday?'disabled':''} data-action="toggle" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${todayKey}" aria-label="Mark done">
+          ${ICONS.check}
+        </button>
+        <button class="circle-miss ${missCls}" ${!scheduledToday?'disabled':''} data-action="mark-missed" data-goal="${goal.id}" data-cp="${cp.id}" data-date="${todayKey}" aria-label="Mark didn't do">
+          ${ICONS.x}
+        </button>
+      </div>
       <div class="cp-row-text">
         <div class="cp-row-title">${escapeHtml(cp.title)}</div>
         <div class="cp-row-sub">${escapeHtml(scheduleLabel(cp.schedule))}</div>
@@ -648,7 +666,22 @@ document.addEventListener('DOMContentLoaded', ()=>{
           return { ...g, checkpoints: g.checkpoints.map(c=>{
             if (c.id!==cpId) return c;
             const completions = { ...c.completions };
-            if (completions[dKey]) delete completions[dKey]; else completions[dKey]=true;
+            if (completions[dKey]===true) delete completions[dKey]; else completions[dKey]=true;
+            return { ...c, completions };
+          })};
+        });
+        persistGoals(next);
+        break;
+      }
+
+      case 'mark-missed': {
+        const goalId = el.dataset.goal, cpId = el.dataset.cp, dKey = el.dataset.date;
+        const next = state.goals.map(g=>{
+          if (g.id!==goalId) return g;
+          return { ...g, checkpoints: g.checkpoints.map(c=>{
+            if (c.id!==cpId) return c;
+            const completions = { ...c.completions };
+            if (completions[dKey]==='missed') delete completions[dKey]; else completions[dKey]='missed';
             return { ...c, completions };
           })};
         });
