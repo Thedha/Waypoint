@@ -390,9 +390,25 @@ function render(){
   root.innerHTML = html;
 }
 
+function focusFirstField(){
+  setTimeout(()=>{
+    const field = document.querySelector('.sheet input, .sheet textarea');
+    if (field) field.focus();
+  }, 60);
+}
+
 /* ===================== event delegation ===================== */
 document.addEventListener('DOMContentLoaded', ()=>{
   const root = document.getElementById('app');
+
+  // keep the focused field visible above the iOS keyboard
+  root.addEventListener('focusin', (e)=>{
+    if (e.target.matches('input, textarea')){
+      setTimeout(()=>{
+        e.target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 300);
+    }
+  });
 
   root.addEventListener('click', (e)=>{
     // clicking the overlay background (not the sheet) closes the modal
@@ -427,6 +443,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
           cpForm.mode = 'weekly'; cpForm.days = []; cpForm.onceDate = dateKey(today);
         }
         render();
+        focusFirstField();
         break;
 
       case 'close-modal':
