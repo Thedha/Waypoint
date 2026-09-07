@@ -413,9 +413,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   root.addEventListener('click', (e)=>{
     // clicking the overlay background (not the sheet) closes the modal
-    if (e.target.closest('[data-stop]')) {
-      // clicks inside the sheet still need to bubble to check data-action below
-    }
     const overlay = e.target.closest('.overlay');
     if (overlay && e.target === overlay){
       state.modal = null; render(); return;
@@ -423,6 +420,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
     const el = e.target.closest('[data-action]');
     if (!el) return;
+
+    // if the click happened inside a data-stop container (the sheet/confirm box)
+    // but the matched action element lives outside it (e.g. the overlay), ignore it —
+    // that's the "closest() climbed past the sheet" bug that closed the modal on tap.
+    const stopEl = e.target.closest('[data-stop]');
+    if (stopEl && !stopEl.contains(el)) return;
+
     const action = el.dataset.action;
 
     switch(action){
