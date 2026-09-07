@@ -96,6 +96,7 @@ const state = {
   modal: null,           // null | 'addGoal' | 'addCheckpoint' | 'confirmDeleteGoal'
   agendaRange: 'today',  // 'today' | 'week' | 'month'
   selectedDate: null,    // dateKey string, used by the month calendar view
+  calendarMonth: { year: new Date().getFullYear(), month: new Date().getMonth() },
 };
 const today = startOfDay(new Date());
 
@@ -239,8 +240,9 @@ function buildMonthMatrix(anchor){
 }
 
 function renderMonthCalendar(){
-  const matrix = buildMonthMatrix(today);
-  const monthLabel = today.toLocaleDateString(undefined, { month:'long', year:'numeric' });
+  const anchor = new Date(state.calendarMonth.year, state.calendarMonth.month, 1);
+  const matrix = buildMonthMatrix(anchor);
+  const monthLabel = anchor.toLocaleDateString(undefined, { month:'long', year:'numeric' });
   const selected = state.selectedDate || dateKey(today);
   const weekdayRow = WEEKDAY_MIN.map(l=>`<div class="cal-weekday">${l}</div>`).join('');
 
@@ -272,7 +274,11 @@ function renderMonthCalendar(){
 
   return `
   <div class="calendar">
-    <div class="cal-month-label">${monthLabel}</div>
+    <div class="cal-nav">
+      <button class="icon-btn" data-action="cal-prev" aria-label="Previous month">${ICONS.back}</button>
+      <div class="cal-month-label">${monthLabel}</div>
+      <button class="icon-btn flip" data-action="cal-next" aria-label="Next month">${ICONS.back}</button>
+    </div>
     <div class="cal-weekdays">${weekdayRow}</div>
     <div class="cal-grid">${rows}</div>
   </div>`;
@@ -485,14 +491,25 @@ function focusFirstField(){
 document.addEventListener('DOMContentLoaded', ()=>{
   const root = document.getElementById('app');
 
-  // keep the focused field visible above the iOS keyboard
+  function scrollFocusedIntoView(){
+    const el = document.activeElement;
+    if (el && el.matches('input, textarea')){
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  // keep the focused field visible above the iOS keyboard.
+  // The keyboard resizes the visual viewport once it finishes animating in,
+  // so that's the reliable signal to scroll on — a fixed setTimeout delay
+  // can fire before the keyboard is actually done opening.
   root.addEventListener('focusin', (e)=>{
     if (e.target.matches('input, textarea')){
-      setTimeout(()=>{
-        e.target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }, 300);
+      setTimeout(scrollFocusedIntoView, 50);
     }
   });
+  if (window.visualViewport){
+    window.visualViewport.addEventListener('resize', scrollFocusedIntoView);
+  }
 
   root.addEventListener('click', (e)=>{
     // clicking the overlay background (not the sheet) closes the modal
@@ -523,6 +540,22 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
       case 'select-date':
         state.selectedDate = el.dataset.date; render(); break;
+
+      case 'cal-prev': {
+        let { year, month } = state.calendarMonth;
+        month -= 1; if (month < 0){ month = 11; year -= 1; }
+        state.calendarMonth = { year, month };
+        state.selectedDate = dateKey(new Date(year, month, 1));
+        render(); break;
+      }
+
+      case 'cal-next': {
+        let { year, month } = state.calendarMonth;
+        month += 1; if (month > 11){ month = 0; year += 1; }
+        state.calendarMonth = { year, month };
+        state.selectedDate = dateKey(new Date(year, month, 1));
+        render(); break;
+      }
 
       case 'open-goal':
         state.selectedGoalId = el.dataset.id; render(); break;
