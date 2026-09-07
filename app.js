@@ -391,10 +391,11 @@ function render(){
 }
 
 function focusFirstField(){
-  setTimeout(()=>{
-    const field = document.querySelector('.sheet input, .sheet textarea');
-    if (field) field.focus();
-  }, 60);
+  // Must run synchronously in the same tap/click handler as the modal open —
+  // iOS Safari will only pop the keyboard for a .focus() call that's still
+  // tied to the user gesture. Any setTimeout/delay breaks that link.
+  const field = document.querySelector('.sheet input, .sheet textarea');
+  if (field) field.focus({ preventScroll: true });
 }
 
 /* ===================== event delegation ===================== */
